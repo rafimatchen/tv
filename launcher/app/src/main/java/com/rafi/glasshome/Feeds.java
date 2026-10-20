@@ -61,20 +61,37 @@ final class Feeds {
         final double temp, high, low;
         final int code, cloudCover;
         final boolean isDay;
+        final double windKmh, windFromDeg, snowDepthM;
         final long sunrise, sunset, fetchedAt; // epoch seconds
 
         Weather(double temp, double high, double low, int code, int cloudCover, boolean isDay,
-                long sunrise, long sunset, long fetchedAt) {
+                double windKmh, double windFromDeg, double snowDepthM, long sunrise, long sunset, long fetchedAt) {
             this.temp = temp;
             this.high = high;
             this.low = low;
             this.code = code;
             this.cloudCover = cloudCover;
             this.isDay = isDay;
+            this.windKmh = windKmh;
+            this.windFromDeg = windFromDeg;
+            this.snowDepthM = snowDepthM;
             this.sunrise = sunrise;
             this.sunset = sunset;
             this.fetchedAt = fetchedAt;
         }
+    }
+
+    /** Health of one data source, shown in the About panel. */
+    static final class Status {
+        volatile long lastAttempt, lastOk; // epoch seconds
+        volatile long lastMillis;          // how long the last attempt took
+        volatile String lastError;         // null when the last attempt worked
+    }
+
+    static final java.util.Map<String, Status> STATUS = new java.util.LinkedHashMap<>();
+
+    static {
+        for (String name : new String[]{"Weather", "Subway", "Buses", "Citi Bike", "Sports"}) STATUS.put(name, new Status());
     }
 
     // Last good data, kept between screensaver sessions so it opens with something on screen.
@@ -106,10 +123,16 @@ final class Feeds {
         });
         Weather w = weather;
         long weatherDelay = w != null && now() - w.fetchedAt < 15 * 60 ? 15 * 60 - (now() - w.fetchedAt) : 0;
-        every(this::fetchWeather, weatherDelay, 15 * 60);
-        every(this::fetchSubway, 0, 30);
-        every(this::fetchBus, 0, 30);
-        every(this::fetchBikes, 0, 120);
+        every("Weather", this::fetchWeather, weatherDelay, 15 * 60);
+        every("Subway", this::fetchSubway, 0, 30);
+        every("Buses", this::fetchBus, 0, 30);
+        every("Citi Bike", this::fetchBikes, 0, 120);
+        // Sports: checked every minute, but only fetched every minute while a followed game is
+        // live (or about to start); otherwise every 15 minutes.
+        exec.scheduleWithFixedDelay(() -> {
+            boolean due = Sports.games == null || Sports.anyLive() || now() - Sports.fetchedAt >= 15 * 60;
+            if (due) runTracked("Sports", this::fetchSports);
+        }, 0, 60, TimeUnit.SECONDS);
     }
 
     void stop() {
@@ -119,15 +142,30 @@ final class Feeds {
     }
 
     /** Fixed delay, so a slow request never stacks up; a failed run never cancels the next one. */
-    private void every(Runnable task, long initialSec, long periodSec) {
-        exec.scheduleWithFixedDelay(() -> {
-            try {
-                task.run();
-            } catch (Throwable t) {
-                // Keep the last good data; try again next period.
-                android.util.Log.w("GlassHome", "feed failed", t);
+    private void every(String name, Runnable task, long initialSec, long periodSec) {
+        exec.scheduleWithFixedDelay(() -> runTracked(name, task), initialSec, periodSec, TimeUnit.SECONDS);
+    }
+
+    private static void runTracked(String name, Runnable task) {
+        Status st = STATUS.get(name);
+        long start = System.currentTimeMillis();
+        st.lastAttempt = start / 1000;
+        try {
+            task.run();
+            st.lastOk = now();
+            st.lastError = null;
+        } catch (Throwable t) {
+            // Keep the last good data; try again next period.
+            Throwable root = t;
+            while (root.getCause() != null) root = root.getCause();
+            if (root instanceof java.io.InterruptedIOException || root instanceof InterruptedException) {
+                return; // stopped on purpose (screen went away); not a failure
             }
-        }, initialSec, periodSec, TimeUnit.SECONDS);
+            st.lastError = root.getClass().getSimpleName() + (root.getMessage() != null ? ": " + root.getMessage() : "");
+            android.util.Log.w("GlassHome", name + " feed failed", t);
+        } finally {
+            st.lastMillis = System.currentTimeMillis() - start;
+        }
     }
 
     private void notifyUi() {
@@ -349,6 +387,17 @@ final class Feeds {
         return uptown ? new Arrivals(sorted, new long[0], now()) : new Arrivals(new long[0], sorted, now());
     }
 
+    // ---------------------------------------------------------------- sports (ESPN, see Sports.java)
+
+    private void fetchSports() {
+        try {
+            Sports.fetch(context);
+        } catch (Exception e) {
+            throw new RuntimeException("sports", e);
+        }
+        notifyUi();
+    }
+
     // ---------------------------------------------------------------- Citi Bike (GBFS)
 
     /** The feed is ~1 MB for every station in the city, so it's streamed and only our stations are kept. */
@@ -401,7 +450,7 @@ final class Feeds {
     private void fetchWeather() {
         String url = "https://api.open-meteo.com/v1/forecast?latitude=" + context.getString(R.string.weather_lat)
                 + "&longitude=" + context.getString(R.string.weather_lon)
-                + "&current=temperature_2m,weather_code,is_day,cloud_cover"
+                + "&current=temperature_2m,weather_code,is_day,cloud_cover,wind_speed_10m,wind_direction_10m,snow_depth"
                 + "&daily=sunrise,sunset,temperature_2m_max,temperature_2m_min"
                 + "&temperature_unit=fahrenheit" // Celsius is computed for display
                 + "&timeformat=unixtime&timezone=auto&forecast_days=1";
@@ -416,6 +465,9 @@ final class Feeds {
                     cur.getInt("weather_code"),
                     cur.optInt("cloud_cover", 0),
                     cur.optInt("is_day", 1) == 1,
+                    cur.optDouble("wind_speed_10m", 0),
+                    cur.optDouble("wind_direction_10m", 0),
+                    cur.optDouble("snow_depth", 0),
                     day.getJSONArray("sunrise").getLong(0),
                     day.getJSONArray("sunset").getLong(0),
                     now());

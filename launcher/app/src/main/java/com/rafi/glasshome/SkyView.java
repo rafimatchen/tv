@@ -19,11 +19,12 @@ import android.view.View;
 import java.util.Random;
 
 /**
- * The screensaver's sky: colours follow the real sun (dawn, day, golden hour, dusk, night),
- * the weather is drawn into it (clouds, rain, snow, fog, lightning), and a Manhattan
- * skyline sits along the bottom with windows that light up after dark.
- * Pure Canvas drawing, no blur and no bitmaps beyond one 96px cloud puff. The frame rate
- * drops to what the current weather needs (1 fps on a clear day, 30 fps in rain).
+ * The screensaver's scene, looking west from Queens across the East River at Midtown:
+ * the sky follows the real sun (dawn, day, golden hour, dusk, night) and moon phase, the
+ * weather is drawn in and blows with the real wind, the skyline has the Empire State Building
+ * (lit in holiday colours), and there are fireworks on July 4th and New Year's Eve and
+ * meteors during the real showers. CityLife draws the street, River the FDR and the water.
+ * Pure Canvas drawing, no blur; 15 fps, or 25 fps while rain or snow is falling.
  */
 final class SkyView extends View {
     static final int CLEAR = 0, PARTLY = 1, OVERCAST = 2, FOG = 3, DRIZZLE = 4, RAIN = 5, SNOW = 6, STORM = 7;
@@ -93,6 +94,42 @@ final class SkyView extends View {
     private long lastFrameMs, startMs;
     private long nextFlashMs, flashMs;
 
+    // Geometry: buildings stand on the street, which sits above the FDR and the river.
+    private float ground, fdrTop, waterTop;
+    private River river;
+    private float[] roofLines;           // building tops, for snow
+    private float flagX, flagY, signX, signY;
+
+    // Weather extras
+    private float windX;                 // km/h, + blows right (north on screen, looking west)
+    private boolean snowCover;
+    private float lightX = Float.NaN;    // sun or moon x, for its glitter path on the river
+    private int lightColor;
+
+    // Calendar: season, holiday crown colours, fireworks, meteor showers
+    private int month = 6, dayOfMonth = 1;
+    private int crownA = 0xFFE1ECFF, crownB = 0xFFE1ECFF;
+    private boolean fireworksTime;
+    private float meteorRate;            // meteors per minute tonight, 0 if no shower
+    private boolean fullMoon;
+
+    // Fireworks bursts and meteors
+    private static final int BURSTS = 5, SPARKS = 36;
+    private final float[] burstX = new float[BURSTS], burstY = new float[BURSTS];
+    private final long[] burstStart = new long[BURSTS];
+    private final int[] burstColor = new int[BURSTS];
+    private final float[] sparkAngle = new float[SPARKS], sparkSpeed = new float[SPARKS];
+    private final float[] sparkPts = new float[SPARKS * 2];
+    private long nextBurstMs, previewFireworksUntil;
+    private float meteorX, meteorY, meteorDx, meteorDy;
+    private long meteorStart, nextMeteorMs;
+    private final Paint sparkPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint flagPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint signPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Path flagPath = new Path();
+    private String signText;
+    private int signColor;
+
     SkyView(Context context) {
         super(context);
         dp = context.getResources().getDisplayMetrics().density;
@@ -139,6 +176,32 @@ final class SkyView extends View {
         if (city != null) city.setDockBikes(n);
     }
 
+    /** Wind as reported (km/h, meteorological direction it blows from). */
+    void setWind(double kmh, double fromDeg) {
+        // Looking west, north is to the right; wind from the north pushes everything left.
+        windX = (float) (-Math.cos(Math.toRadians(fromDeg)) * kmh);
+    }
+
+    void setSnowCover(boolean snow) {
+        snowCover = snow;
+    }
+
+    /** A lit sign on a rooftop, e.g. a live score; null hides it. */
+    void setSign(String text, int color) {
+        signText = text;
+        signColor = color;
+    }
+
+    /** Preview: a few minutes of fireworks, or one meteor. */
+    void previewFireworks() {
+        previewFireworksUntil = SystemClock.uptimeMillis() + 90_000;
+    }
+
+    void previewMeteor() {
+        nextMeteorMs = 0;
+        meteorRate = Math.max(meteorRate, 0.01f);
+    }
+
     /** Preview a time of day (epoch seconds), or 0 for the real clock. */
     void setFakeNow(long epochSec) {
         fakeNow = epochSec;
@@ -175,6 +238,9 @@ final class SkyView extends View {
     protected void onSizeChanged(int nw, int nh, int ow, int oh) {
         w = nw;
         h = nh;
+        waterTop = h - 26 * dp;
+        fdrTop = waterTop - 8 * dp;
+        ground = fdrTop;
         starPts = new float[4][];
         starGroupPhase = new float[4];
         int[] perGroup = {44, 32, 22, 12}; // fewer of the bigger stars
@@ -190,7 +256,15 @@ final class SkyView extends View {
         snowPaint.setStrokeCap(Paint.Cap.ROUND);
         buildPuff();
         buildSkyline();
-        city = new CityLife(dp, puff, w, h, winX, winY);
+        city = new CityLife(dp, puff, w, h, ground, winX, winY);
+        river = new River(dp, w, h, fdrTop, waterTop);
+        for (int i = 0; i < SPARKS; i++) {
+            sparkAngle[i] = (float) (Math.PI * 2 * i / SPARKS);
+            sparkSpeed[i] = (38 + rnd.nextFloat() * 22) * dp;
+        }
+        sparkPaint.setStrokeCap(Paint.Cap.ROUND);
+        signPaint.setTypeface(Fonts.get(getContext(), 500));
+        signPaint.setTextSize(10.5f * dp);
         rebuildParticles();
         skyKey = -1;
     }
@@ -212,6 +286,9 @@ final class SkyView extends View {
         float esbX = w * 0.70f;
         float[] wx = new float[400], wy = new float[400];
         int wn = 0;
+        float[] roofs = new float[400];
+        int rn = 0;
+        float base = ground;
         while (x < w + 20 * dp) {
             float bw = (16 + r.nextFloat() * 30) * dp;
             boolean tall = r.nextFloat() < 0.18f;
@@ -221,12 +298,20 @@ final class SkyView extends View {
             } else if (x < w * 0.62f) {
                 // Foreground towers behind the transit rows, so the text always sits on a
                 // dark silhouette, even against a bright daytime sky.
-                bh = Math.max(bh, (176 + r.nextFloat() * 36) * dp);
+                bh = Math.max(bh, (192 + r.nextFloat() * 34) * dp);
             }
-            skyline.addRect(x, h - bh, x + bw + 1, h, Path.Direction.CW);
-            for (float yy = h - bh + 8 * dp; yy < h - 6 * dp; yy += 7 * dp) {
+            skyline.addRect(x, base - bh, x + bw + 1, base, Path.Direction.CW);
+            if (rn + 4 <= roofs.length) {
+                roofs[rn++] = x + 1;
+                roofs[rn++] = base - bh;
+                roofs[rn++] = x + bw;
+                roofs[rn++] = base - bh;
+            }
+            if (x <= w * 0.80f && x + bw > w * 0.80f) { signX = x + bw / 2; signY = base - bh; }
+            if (x <= w * 0.94f && x + bw > w * 0.94f) { flagX = x + bw * 0.6f; flagY = base - bh; }
+            for (float yy = base - bh + 8 * dp; yy < base - 6 * dp; yy += 7 * dp) {
                 for (float xx = x + 4 * dp; xx < x + bw - 4 * dp; xx += 6 * dp) {
-                    boolean behindText = xx < w * 0.66f && yy > h - 215 * dp;
+                    boolean behindText = xx < w * 0.66f && yy > base - 190 * dp;
                     if (!behindText && wn < wx.length && r.nextFloat() < 0.07f) {
                         wx[wn] = xx;
                         wy[wn] = yy;
@@ -238,14 +323,19 @@ final class SkyView extends View {
         }
         // Empire State Building: base, setbacks, crown and mast.
         float cx = esbX;
-        skyline.addRect(cx - 30 * dp, h - 150 * dp, cx + 30 * dp, h, Path.Direction.CW);
-        skyline.addRect(cx - 22 * dp, h - 196 * dp, cx + 22 * dp, h, Path.Direction.CW);
-        skyline.addRect(cx - 15 * dp, h - 214 * dp, cx + 15 * dp, h, Path.Direction.CW);
-        skyline.addRect(cx - 9 * dp, h - 228 * dp, cx + 9 * dp, h, Path.Direction.CW);
-        skyline.addRect(cx - 4 * dp, h - 240 * dp, cx + 4 * dp, h, Path.Direction.CW);
-        skyline.addRect(cx - 1.3f * dp, h - 270 * dp, cx + 1.3f * dp, h, Path.Direction.CW);
-        crown = new RectF(cx - 9 * dp, h - 228 * dp, cx + 9 * dp, h - 214 * dp);
-        for (float yy = h - 190 * dp; yy < h - 20 * dp; yy += 9 * dp) {
+        float[][] tiers = {{30, 150}, {22, 196}, {15, 214}, {9, 228}, {4, 240}, {1.3f, 270}};
+        for (float[] tier : tiers) {
+            skyline.addRect(cx - tier[0] * dp, base - tier[1] * dp, cx + tier[0] * dp, base, Path.Direction.CW);
+            if (tier[0] > 3 && rn + 4 <= roofs.length) {
+                roofs[rn++] = cx - tier[0] * dp;
+                roofs[rn++] = base - tier[1] * dp;
+                roofs[rn++] = cx + tier[0] * dp;
+                roofs[rn++] = base - tier[1] * dp;
+            }
+        }
+        roofLines = java.util.Arrays.copyOf(roofs, rn);
+        crown = new RectF(cx - 9 * dp, base - 228 * dp, cx + 9 * dp, base - 214 * dp);
+        for (float yy = base - 190 * dp; yy < base - 20 * dp; yy += 9 * dp) {
             for (float xx = cx - 18 * dp; xx < cx + 18 * dp; xx += 6 * dp) {
                 if (wn < wx.length && r.nextFloat() < 0.12f) {
                     wx[wn] = xx;
@@ -276,7 +366,7 @@ final class SkyView extends View {
             cloudX[i] = rnd.nextFloat() * (w + 400 * dp) - 200 * dp;
             cloudY[i] = mood == FOG ? h * (0.35f + rnd.nextFloat() * 0.5f) : h * (0.05f + rnd.nextFloat() * 0.45f);
             cloudScale[i] = (mood == FOG ? 2.6f : 1.4f) + rnd.nextFloat() * 1.6f;
-            cloudSpeed[i] = (4 + rnd.nextFloat() * 8) * dp; // px per second
+            cloudSpeed[i] = 0.6f + rnd.nextFloat() * 0.6f; // multiplier on the wind
         }
         int drops = mood == RAIN ? 140 : mood == STORM ? 180 : mood == DRIZZLE ? 70 : mood == SNOW ? 120 : 0;
         dropBuf = new float[drops * 4];
@@ -298,6 +388,18 @@ final class SkyView extends View {
         nextFlashMs = SystemClock.uptimeMillis() + 4000;
     }
 
+    /** Clouds drift with the wind; still air still lets them creep slowly to the right. */
+    private float cloudVelocity() {
+        float v = windX * 0.9f * dp; // dp/s per km/h
+        if (Math.abs(v) < 2.5f * dp) v = Math.copySign(2.5f * dp, v == 0 ? 1 : v);
+        return v;
+    }
+
+    /** Rain leans with the wind (0 = straight down). */
+    private float rainSlant() {
+        return Math.max(-0.7f, Math.min(0.7f, windX / 45f));
+    }
+
     // ---------------------------------------------------------------- sky colours
 
     private long now() {
@@ -312,6 +414,10 @@ final class SkyView extends View {
         java.util.Calendar cal = java.util.Calendar.getInstance();
         cal.setTimeInMillis(now * 1000);
         hour = cal.get(java.util.Calendar.HOUR_OF_DAY) + cal.get(java.util.Calendar.MINUTE) / 60f;
+        month = cal.get(java.util.Calendar.MONTH) + 1;
+        dayOfMonth = cal.get(java.util.Calendar.DAY_OF_MONTH);
+        if (city != null) city.setDate(month, dayOfMonth);
+        updateCalendar(cal);
         darkness = computeSky(now, sunrise, sunset, mood, sky);
         cloudiness = cloudinessFor(mood);
         skyPaint.setShader(new LinearGradient(0, 0, 0, h, new int[]{sky[0], sky[1], sky[2], sky[2]},
@@ -323,6 +429,39 @@ final class SkyView extends View {
             puffColor = cloud;
             puffPaint.setColorFilter(new PorterDuffColorFilter(cloud, PorterDuff.Mode.SRC_IN));
         }
+    }
+
+    /** Holiday crown colours, fireworks nights, meteor showers and full moons for today. */
+    private void updateCalendar(java.util.Calendar cal) {
+        int m = month, d = dayOfMonth;
+        int hr = cal.get(java.util.Calendar.HOUR_OF_DAY), min = cal.get(java.util.Calendar.MINUTE);
+        // Empire State Building: a simplified version of its real lighting calendar.
+        if (m == 12 && d <= 26) { crownA = 0xFFE5383B; crownB = 0xFF2DBE60; }          // holidays
+        else if ((m == 12 && d == 31) || (m == 1 && d == 1)) { crownA = 0xFFFFFFFF; crownB = 0xFFFFD36B; }
+        else if (m == 7 && d == 4) { crownA = 0xFFE5383B; crownB = 0xFF3F6FE0; }       // red, white and blue
+        else if (m == 10 && d >= 24) { crownA = 0xFFFF8A1F; crownB = 0xFFFF8A1F; }     // Halloween
+        else if (m == 2 && d == 14) { crownA = 0xFFFF4D6D; crownB = 0xFFFFFFFF; }      // Valentine's
+        else if (m == 3 && d == 17) { crownA = 0xFF2DBE60; crownB = 0xFF2DBE60; }      // St Patrick's
+        else if (m == 6) { crownA = 0xFFFF5A5A; crownB = 0xFF5AA8FF; }                // Pride month
+        else { crownA = 0xFFE1ECFF; crownB = 0xFFE1ECFF; }                           // plain white
+        // Fireworks: July 4th evening, and around midnight on New Year's Eve.
+        fireworksTime = (m == 7 && d == 4 && (hr == 21 && min >= 15 || hr == 22 && min < 5))
+                || (m == 12 && d == 31 && hr == 23 && min >= 58) || (m == 1 && d == 1 && hr == 0 && min < 20);
+        // Meteor showers: {month, peak day, days either side, meteors per minute at peak}
+        int[][] showers = {{1, 3, 1, 2}, {4, 22, 1, 1}, {5, 6, 2, 1}, {8, 12, 3, 3}, {10, 21, 2, 1},
+                {11, 17, 1, 1}, {12, 14, 3, 3}};
+        meteorRate = 0;
+        int doy = cal.get(java.util.Calendar.DAY_OF_YEAR);
+        for (int[] sh : showers) {
+            java.util.Calendar peak = (java.util.Calendar) cal.clone();
+            peak.set(java.util.Calendar.MONTH, sh[0] - 1);
+            peak.set(java.util.Calendar.DAY_OF_MONTH, sh[1]);
+            int off = Math.abs(peak.get(java.util.Calendar.DAY_OF_YEAR) - doy);
+            if (off <= sh[2]) meteorRate = sh[3] * (1f - 0.5f * off / (sh[2] + 1f));
+        }
+        double days = (cal.getTimeInMillis() / 1000 - 947182440L) / 86400.0;
+        double phase = (days % 29.530588) / 29.530588;
+        fullMoon = Math.abs(phase - 0.5) < 0.04; // about a day either side
     }
 
     /**
@@ -418,25 +557,30 @@ final class SkyView extends View {
         updateSky();
 
         city.update(dt, ms, darkness, hour, mood);
+        river.update(dt, ms, hour, darkness);
 
         canvas.drawRect(0, 0, w, h, skyPaint);
         drawStars(canvas, t);
+        drawMeteor(canvas, ms);
         drawSunOrMoon(canvas);
         city.drawSky(canvas, ms);
         drawClouds(canvas, dt);
-        drawPrecipitation(canvas, dt, t);
+        boolean fireworks = fireworksTime || ms < previewFireworksUntil;
+        if (fireworks) drawFireworks(canvas, ms);
         canvas.drawRect(0, h * 0.55f, w, h, scrimPaint);
         drawSkyline(canvas, t);
         city.drawStreet(canvas, skylinePaint.getColor(), ms);
+        river.draw(canvas, t, darkness, sky, skylinePaint.getColor(), lightX, lightColor);
+        drawPrecipitation(canvas, dt, t);
         drawLightning(canvas, ms);
 
-        // 25 fps for falling rain or snow; 15 fps is plenty for slow street life.
-        boolean falling = mood == RAIN || mood == STORM || mood == DRIZZLE || mood == SNOW;
-        postInvalidateDelayed(falling ? 40 : 66);
+        // 25 fps for falling rain, snow or fireworks; 15 fps is plenty for slow street life.
+        boolean busy = mood == RAIN || mood == STORM || mood == DRIZZLE || mood == SNOW || fireworks;
+        postInvalidateDelayed(busy ? 40 : 66);
     }
 
     private void drawStars(Canvas c, float t) {
-        float vis = darkness * (1 - cloudiness * 0.95f);
+        float vis = darkness * (1 - cloudiness * 0.95f) * (fullMoon ? 0.6f : 1f); // moonlight washes them out
         if (vis < 0.02f) return;
         for (int g = 0; g < starPts.length; g++) {
             float tw = 0.55f + 0.45f * (float) Math.sin(t * (0.5f + g * 0.17f) + starGroupPhase[g]);
@@ -462,14 +606,19 @@ final class SkyView extends View {
             drawGlow(c, x, y, (110 + 50 * low) * dp, (glow & 0x00FFFFFF) | ((int) (120 * vis) << 24));
             discPaint.setColor((lerpColor(0xFFFFFBEA, 0xFFFFC48A, low) & 0x00FFFFFF) | ((int) (255 * vis) << 24));
             c.drawCircle(x, y, 20 * dp, discPaint);
+            lightX = vis > 0.3f ? x : Float.NaN;
+            lightColor = lerpColor(0xFFFFF1C9, 0xFFFFA860, low);
         } else {
             long nightStart = now > set ? set : set - 86400;
             long nightEnd = now > set ? rise + 86400 : rise;
             float p = (now - nightStart) / (float) (nightEnd - nightStart);
             float x = w * (0.42f + 0.50f * p);
             float y = horizon - (float) Math.sin(Math.PI * clamp(p)) * h * 0.55f;
-            drawGlow(c, x, y, 70 * dp, ((int) (60 * vis) << 24) | 0xC9D6FF);
-            drawMoon(c, x, y, 15 * dp, vis);
+            float big = fullMoon ? 1.3f : 1f; // a full moon rises bigger and brighter
+            drawGlow(c, x, y, 70 * dp * big * big, ((int) ((fullMoon ? 110 : 60) * vis) << 24) | 0xC9D6FF);
+            drawMoon(c, x, y, 15 * dp * big, vis);
+            lightX = vis > 0.3f ? x : Float.NaN;
+            lightColor = 0xFFDDE6FF;
         }
     }
 
@@ -508,11 +657,13 @@ final class SkyView extends View {
         float alpha = mood == FOG ? 0.32f : mood == PARTLY ? 0.55f : 0.6f;
         puffPaint.setAlpha((int) (255 * alpha));
         float pw = puff.getWidth();
+        float v = cloudVelocity();
         for (int i = 0; i < cloudX.length; i++) {
-            cloudX[i] += cloudSpeed[i] * dt;
+            cloudX[i] += cloudSpeed[i] * v * dt;
             float s = cloudScale[i] * 80 * dp / pw;
             float span = pw * s * 3.2f;
             if (cloudX[i] - span > w) cloudX[i] = -span;
+            if (cloudX[i] + span < 0) cloudX[i] = w + span;
             // A cloud is three overlapping puffs; fog stretches them into wide banks.
             for (int k = 0; k < 3; k++) {
                 float ox = (k - 1) * pw * s * 0.7f, oy = (k == 1 ? -0.25f : 0) * pw * s;
@@ -529,14 +680,16 @@ final class SkyView extends View {
         int n = dropX.length;
         if (n == 0) return;
         boolean snow = mood == SNOW;
-        float slant = 0.18f;
+        float slant = rainSlant();
+        float snowDrift = windX * 0.8f * dp;
+        float margin = 120 * dp;
         for (int i = 0; i < n; i++) {
             dropY[i] += dropSpeed[i] * dt;
-            if (snow) dropX[i] += (float) Math.sin(t * 0.8f + i) * 10 * dp * dt;
-            else dropX[i] -= dropSpeed[i] * slant * dt;
-            if (dropY[i] > h + 30 * dp) {
+            if (snow) dropX[i] += ((float) Math.sin(t * 0.8f + i) * 10 * dp + snowDrift) * dt;
+            else dropX[i] += dropSpeed[i] * slant * dt;
+            if (dropY[i] > h + 30 * dp || dropX[i] < -margin || dropX[i] > w + margin) {
                 dropY[i] = -30 * dp;
-                dropX[i] = rnd.nextFloat() * (w + 100 * dp);
+                dropX[i] = rnd.nextFloat() * (w + 2 * margin) - margin;
             }
             if (snow) {
                 dropBuf[i * 2] = dropX[i];
@@ -544,7 +697,7 @@ final class SkyView extends View {
             } else {
                 dropBuf[i * 4] = dropX[i];
                 dropBuf[i * 4 + 1] = dropY[i];
-                dropBuf[i * 4 + 2] = dropX[i] + dropLen[i] * slant;
+                dropBuf[i * 4 + 2] = dropX[i] - dropLen[i] * slant;
                 dropBuf[i * 4 + 3] = dropY[i] - dropLen[i];
             }
         }
@@ -569,16 +722,119 @@ final class SkyView extends View {
         c.save();
         c.translate(drift, 0);
         c.drawPath(skyline, skylinePaint);
+        if (snowCover || mood == SNOW) { // snow settles on the rooftops
+            flagPaint.setStyle(Paint.Style.STROKE);
+            flagPaint.setStrokeWidth(2.6f * dp);
+            flagPaint.setColor(darkness > 0.5f ? 0xFF8C93A6 : 0xFFE9EEF5);
+            c.drawLines(roofLines, flagPaint);
+        }
         city.drawWindows(c);
         if (darkness > 0.05f) {
-            // The Empire State's floodlit crown: a soft glow and two lit bands.
-            drawGlow(c, crown.centerX(), crown.centerY(), 34 * dp, ((int) (70 * darkness) << 24) | 0xBFD4FF);
-            windowPaint.setColor(Color.argb((int) (150 * darkness), 225, 236, 255));
+            // The Empire State's floodlit crown, in the colours of the day.
+            drawGlow(c, crown.centerX(), crown.centerY(), 34 * dp, ((int) (80 * darkness) << 24) | (crownA & 0xFFFFFF));
             float band = 2.2f * dp;
+            windowPaint.setColor((crownA & 0xFFFFFF) | ((int) (170 * darkness) << 24));
             c.drawRect(crown.left, crown.top, crown.right, crown.top + band, windowPaint);
+            windowPaint.setColor((crownB & 0xFFFFFF) | ((int) (170 * darkness) << 24));
             c.drawRect(crown.left + 3 * dp, crown.centerY(), crown.right - 3 * dp, crown.centerY() + band, windowPaint);
         }
+        drawFlag(c, t);
+        drawSign(c);
         c.restore();
+    }
+
+    /** A small flag on a rooftop, streaming with the real wind (hanging limp in calm air). */
+    private void drawFlag(Canvas c, float t) {
+        if (flagY == 0) return;
+        float poleTop = flagY - 14 * dp;
+        flagPaint.setStyle(Paint.Style.STROKE);
+        flagPaint.setStrokeWidth(dp);
+        flagPaint.setColor(lerpColor(skylinePaint.getColor(), 0xFF6A707C, 0.5f));
+        c.drawLine(flagX, flagY, flagX, poleTop, flagPaint);
+        float strength = Math.min(1f, Math.abs(windX) / 20f); // 0 limp .. 1 fully out
+        float dir = windX >= 0 ? 1 : -1;
+        float len = 9 * dp, hgt = 5 * dp;
+        float droop = (1 - strength) * 6 * dp;
+        float flutter = (float) Math.sin(t * (4 + 6 * strength)) * (0.6f + strength) * dp;
+        flagPath.reset();
+        flagPath.moveTo(flagX, poleTop);
+        flagPath.quadTo(flagX + dir * len * 0.5f, poleTop + droop * 0.5f + flutter, flagX + dir * len * (0.5f + 0.5f * strength), poleTop + droop);
+        flagPath.lineTo(flagX + dir * len * (0.5f + 0.5f * strength), poleTop + droop + hgt);
+        flagPath.quadTo(flagX + dir * len * 0.5f, poleTop + hgt + droop * 0.5f - flutter, flagX, poleTop + hgt);
+        flagPath.close();
+        flagPaint.setStyle(Paint.Style.FILL);
+        flagPaint.setColor(darkness > 0.6f ? 0xFF8A2F2F : 0xFFD8443A);
+        c.drawPath(flagPath, flagPaint);
+    }
+
+    /** A lit rooftop sign (live scores on game days). */
+    private void drawSign(Canvas c) {
+        if (signText == null || signY == 0) return;
+        float tw = signPaint.measureText(signText);
+        float pad = 4 * dp, top = signY - 18 * dp, left = signX - tw / 2 - pad;
+        flagPaint.setStyle(Paint.Style.FILL);
+        flagPaint.setColor(0xF0101216);
+        c.drawRect(left, top, left + tw + 2 * pad, top + 13 * dp, flagPaint);
+        flagPaint.setColor(lerpColor(skylinePaint.getColor(), 0xFF5A606C, 0.4f));
+        c.drawRect(signX - 0.6f * dp, top + 13 * dp, signX + 0.6f * dp, signY, flagPaint); // the stand
+        signPaint.setColor(signColor);
+        signPaint.setShadowLayer(4 * dp, 0, 0, signColor);
+        c.drawText(signText, left + pad, top + 10 * dp, signPaint);
+    }
+
+    /** Fireworks over the skyline: bursts of sparks that open, fall and fade. */
+    private void drawFireworks(Canvas c, long ms) {
+        if (ms > nextBurstMs) {
+            int slot = 0;
+            for (int i = 1; i < BURSTS; i++) if (burstStart[i] < burstStart[slot]) slot = i;
+            burstStart[slot] = ms;
+            burstX[slot] = w * (0.52f + rnd.nextFloat() * 0.43f); // right of the clock
+            burstY[slot] = h * (0.10f + rnd.nextFloat() * 0.28f);
+            int[] palette = {0xFFFF5A5A, 0xFFFFD36B, 0xFF6BD0FF, 0xFFFFFFFF, 0xFF8CFF9E, 0xFFFF8AE0};
+            burstColor[slot] = palette[rnd.nextInt(palette.length)];
+            nextBurstMs = ms + 700 + rnd.nextInt(1600);
+        }
+        for (int b = 0; b < BURSTS; b++) {
+            float age = (ms - burstStart[b]) / 1000f;
+            if (burstStart[b] == 0 || age > 2.2f) continue;
+            float open = 1 - (float) Math.pow(1 - Math.min(1, age / 1.1f), 3); // fast then slowing
+            float fall = 9 * dp * age * age;
+            for (int i = 0; i < SPARKS; i++) {
+                float r = sparkSpeed[i] * open;
+                sparkPts[i * 2] = burstX[b] + (float) Math.cos(sparkAngle[i]) * r;
+                sparkPts[i * 2 + 1] = burstY[b] + (float) Math.sin(sparkAngle[i]) * r + fall;
+            }
+            float a = age < 0.15f ? age / 0.15f : Math.max(0, 1 - (age - 0.15f) / 2.05f);
+            sparkPaint.setStrokeWidth(2.2f * dp);
+            sparkPaint.setColor((burstColor[b] & 0xFFFFFF) | ((int) (255 * a) << 24));
+            c.drawPoints(sparkPts, sparkPaint);
+            if (age < 0.6f) drawGlow(c, burstX[b], burstY[b], 40 * dp, ((int) (90 * (1 - age / 0.6f)) << 24) | (burstColor[b] & 0xFFFFFF));
+        }
+    }
+
+    /** Meteors during the real showers, on clear dark nights. */
+    private void drawMeteor(Canvas c, long ms) {
+        if (meteorRate <= 0 || darkness < 0.7f || cloudiness > 0.6f) return;
+        if (ms > nextMeteorMs && ms - meteorStart > 1500) {
+            meteorStart = ms;
+            meteorX = w * (0.3f + rnd.nextFloat() * 0.65f);
+            meteorY = h * (0.04f + rnd.nextFloat() * 0.25f);
+            float ang = (float) Math.toRadians(150 + rnd.nextFloat() * 25); // down and to the left
+            float speed = (420 + rnd.nextFloat() * 260) * dp;
+            meteorDx = (float) Math.cos(ang) * speed;                    // leftwards
+            meteorDy = (float) Math.abs(Math.sin(ang)) * speed * 0.55f;  // and gently down
+            nextMeteorMs = ms + (long) (60_000 / Math.max(0.01f, meteorRate) * (0.4f + rnd.nextFloat() * 1.2f));
+        }
+        float age = (ms - meteorStart) / 1000f;
+        if (age > 0.65f) return;
+        float hx = meteorX + meteorDx * age, hy = meteorY + meteorDy * age;
+        float a = age < 0.1f ? age / 0.1f : 1 - (age - 0.1f) / 0.55f;
+        sparkPaint.setStrokeWidth(1.6f * dp);
+        sparkPaint.setColor(Color.argb((int) (230 * a), 255, 255, 255));
+        c.drawLine(hx, hy, hx - meteorDx * 0.08f, hy - meteorDy * 0.08f, sparkPaint);
+        sparkPaint.setStrokeWidth(dp);
+        sparkPaint.setColor(Color.argb((int) (90 * a), 200, 220, 255));
+        c.drawLine(hx - meteorDx * 0.08f, hy - meteorDy * 0.08f, hx - meteorDx * 0.22f, hy - meteorDy * 0.22f, sparkPaint);
     }
 
     private void drawLightning(Canvas c, long ms) {

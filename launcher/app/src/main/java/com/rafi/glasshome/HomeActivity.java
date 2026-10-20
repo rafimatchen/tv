@@ -110,7 +110,8 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
     // Live data, shared with the screensaver: weather on the date line, a one-line transit
     // glance, and a faint time-of-day sky tint. Fetched only while home is in front.
     private Feeds feeds;
-    private TextView glance;
+    private TextView glance, gameLine;
+    private AboutPanel about;
     private View skyTint;
     private GradientDrawable skyTintDrawable;
     private final Runnable glanceTick = new Runnable() {
@@ -161,6 +162,7 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         buildViews();
         setContentView(root);
         inputsMenu = new InputsMenu(this, root);
+        about = new AboutPanel(this, root);
 
         reloadApps();
         restoreFocusState();
@@ -210,6 +212,7 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         super.onStop();
         inForeground = false;
         unregisterReceiver(timeReceiver);
+        about.dismiss();
         feeds.stop();
         handler.removeCallbacks(glanceTick);
         inputsMenu.dismiss();
@@ -341,6 +344,10 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(-2, -2);
         glp.topMargin = px(12);
         clockBlock.addView(glance, glp);
+        gameLine = text(300, 17, 0x99FFFFFF);
+        LinearLayout.LayoutParams gml = new LinearLayout.LayoutParams(-2, -2);
+        gml.topMargin = px(8);
+        clockBlock.addView(gameLine, gml);
         page.addView(clockBlock, at(-2, -2, side, px(34)));
 
         LinearLayout pillRow = new LinearLayout(this);
@@ -729,6 +736,15 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         boolean nav = code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
                 || code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN;
 
+        if (about.isShowing()) {
+            if (down && e.getRepeatCount() == 0) about.dismiss(); // any key closes it
+            selectArmed = false;
+            return code != KeyEvent.KEYCODE_HOME;
+        }
+        if (down && (code == KeyEvent.KEYCODE_INFO || code == KeyEvent.KEYCODE_MENU)) {
+            about.show();
+            return true;
+        }
         if (inputsMenu.isShowing()) {
             if (nav || select || code == KeyEvent.KEYCODE_BACK) {
                 if (down && e.getRepeatCount() == 0 || down && nav) inputsMenu.onKey(code);
@@ -751,7 +767,10 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         if (select) {
             // Act on release so the key-up doesn't leak into the app we open.
             if (down && e.getRepeatCount() == 0) selectArmed = true;
-            else if (!down && selectArmed && !e.isCanceled()) {
+            else if (down && selectArmed && e.isLongPress() && zone == ZONE_TOP && topIndex == PILL_SETTINGS) {
+                selectArmed = false; // long-press OK on Settings: the About panel
+                about.show();
+            } else if (!down && selectArmed && !e.isCanceled()) {
                 selectArmed = false;
                 onSelect();
             }
@@ -891,6 +910,19 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         }
         glance.setText(s);
         glance.setVisibility(s.length() > 0 ? View.VISIBLE : View.GONE);
+
+        // Game day: "[Leafs] 2–1 SJ · 3rd 8:52"
+        Sports.Game g = Sports.headline();
+        if (g == null) {
+            gameLine.setVisibility(View.GONE);
+        } else {
+            SpannableStringBuilder gs = new SpannableStringBuilder();
+            badge(gs, new BadgeSpan(g.team, null, g.color, false, badge, bh));
+            boolean live = "in".equals(g.state);
+            glanceSpan(gs, Sports.describe(g, false), live ? 0xE6FFFFFF : 0x99FFFFFF, live ? 500 : 300);
+            gameLine.setText(gs);
+            gameLine.setVisibility(View.VISIBLE);
+        }
     }
 
     private void badge(SpannableStringBuilder s, BadgeSpan span) {

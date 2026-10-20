@@ -16,6 +16,8 @@ import java.util.Random;
  * A few things follow the live data: a subway entrance glows and lets people out when a
  * 6 train is due, an M15 pulls into its stop when a bus is arriving, and the Citi Bike dock
  * holds as many bikes as the real one.
+ * Street trees follow the seasons (blossom, green, autumn colours, bare) and wear lights
+ * through the holidays.
  * Everything is batched into a handful of draw calls; nothing allocates per frame.
  */
 final class CityLife {
@@ -28,7 +30,12 @@ final class CityLife {
     private final Bitmap puff;
     private final float puffW;
     private int w, h;
-    private float curb, laneFar, laneNear;
+    private float ground, curb, laneFar, laneNear;
+
+    // Street trees and their season
+    private float[] treeX;
+    private float[] treeLights; // points around bare canopies for December
+    private int month = 6, day = 1;
 
     // Apartment windows
     private float[] winXY;
@@ -77,15 +84,17 @@ final class CityLife {
     private final RectF r = new RectF();
     private final float[] dashLines;
 
-    CityLife(float dp, Bitmap puff, int w, int h, float[] winX, float[] winY) {
+    /** @param ground the bottom of the street (top of the FDR) */
+    CityLife(float dp, Bitmap puff, int w, int h, float ground, float[] winX, float[] winY) {
         this.dp = dp;
         this.puff = puff;
         this.puffW = puff.getWidth();
         this.w = w;
         this.h = h;
-        curb = h - 21 * dp;
-        laneFar = h - 10 * dp;
-        laneNear = h - 2 * dp;
+        this.ground = ground;
+        curb = ground - 21 * dp;
+        laneFar = ground - 10 * dp;
+        laneNear = ground - 2 * dp;
         line.setStrokeCap(Paint.Cap.ROUND);
         dots.setStrokeCap(Paint.Cap.ROUND);
         squares.setStrokeCap(Paint.Cap.SQUARE);
@@ -111,6 +120,18 @@ final class CityLife {
             int k = i * 8;
             postLines[k] = x; postLines[k + 1] = curb; postLines[k + 2] = x; postLines[k + 3] = top;
             postLines[k + 4] = x; postLines[k + 5] = top; postLines[k + 6] = x + 5 * dp; postLines[k + 7] = top;
+        }
+        // A tree between each pair of lamps, with fixed spots for holiday lights.
+        treeX = new float[lamps];
+        treeLights = new float[lamps * 9 * 2];
+        for (int i = 0; i < lamps; i++) {
+            treeX[i] = lampX[i] + 34 * dp + (rnd.nextFloat() - 0.5f) * 10 * dp;
+            for (int k = 0; k < 9; k++) {
+                double a = Math.PI * (0.9 + 1.2 * k / 8.0);
+                float rr = (5 + rnd.nextFloat() * 3) * dp;
+                treeLights[(i * 9 + k) * 2] = treeX[i] + (float) Math.cos(a) * rr;
+                treeLights[(i * 9 + k) * 2 + 1] = curb - 15 * dp + (float) Math.sin(a) * rr * 0.8f;
+            }
         }
         int dashes = (int) (w / (26 * dp)) + 1;
         dashLines = new float[dashes * 4];
@@ -140,6 +161,11 @@ final class CityLife {
 
     void busArriving() {
         busWanted = true;
+    }
+
+    void setDate(int month, int day) {
+        this.month = month;
+        this.day = day;
     }
 
     void setDockBikes(int n) {
@@ -363,7 +389,7 @@ final class CityLife {
 
         // Road and sidewalk edge
         fill.setColor(SkyView.lerpColor(skylineColor, 0xFF2C3038, 0.22f));
-        c.drawRect(0, curb, w, h, fill);
+        c.drawRect(0, curb, w, ground, fill);
         line.setStrokeWidth(dp);
         line.setColor(0x26FFFFFF);
         c.drawLine(0, curb, w, curb, line);
@@ -384,6 +410,8 @@ final class CityLife {
             dots.setColor(Color.argb((int) (255 * lv), 255, 236, 200));
             c.drawPoint(hx, hy + dp, dots);
         }
+
+        drawTrees(c, night, ms);
 
         // Subway entrance: two green globes that brighten when a 6 train is due
         float globe = night ? 0.35f + 0.65f * subwayPulse : 0.2f + 0.5f * subwayPulse;
@@ -416,6 +444,50 @@ final class CityLife {
         drawPeople(c, night, wet);
         drawVehicles(c, night, wet, -1);
         drawVehicles(c, night, wet, 1);
+    }
+
+    /** Season colours for the canopy, or 0 for bare branches (winter). Month is 1-12. */
+    private int canopyColor(int i) {
+        switch (month) {
+            case 4: return day < 20 ? 0xFFF4C7D6 : 0xFF9CC77A;   // blossom, then fresh green
+            case 5: case 6: case 7: case 8: return 0xFF3E6B3F;
+            case 9: return i % 3 == 0 ? 0xFF8A8F3A : 0xFF52733D; // first yellowing
+            case 10: return i % 3 == 0 ? 0xFFD9822B : i % 3 == 1 ? 0xFFB4442F : 0xFFD4A531;
+            case 11: return day < 15 ? 0xFF9A5B2E : 0;           // last brown leaves, then bare
+            default: return 0;                                   // December to March
+        }
+    }
+
+    private void drawTrees(Canvas c, boolean night, long ms) {
+        float top = curb - 15 * dp;
+        line.setStrokeWidth(1.6f * dp);
+        int trunk = night ? 0xFF2A2B30 : 0xFF3B3430;
+        for (int i = 0; i < treeX.length; i++) {
+            float x = treeX[i];
+            line.setColor(trunk);
+            c.drawLine(x, curb, x, top + 2 * dp, line);
+            int leaf = canopyColor(i);
+            if (leaf == 0) { // bare branches
+                line.setStrokeWidth(1f * dp);
+                c.drawLine(x, top + 3 * dp, x - 5 * dp, top - 3 * dp, line);
+                c.drawLine(x, top + 1 * dp, x + 5 * dp, top - 4 * dp, line);
+                c.drawLine(x, top + 2 * dp, x + 1 * dp, top - 6 * dp, line);
+                line.setStrokeWidth(1.6f * dp);
+                continue;
+            }
+            fill.setColor(night ? SkyView.lerpColor(leaf, 0xFF0D0F14, 0.72f * darkness) : leaf);
+            float rad = (month == 11 ? 4.8f : 6.5f) * dp;
+            c.drawCircle(x - 2.5f * dp, top, rad, fill);
+            c.drawCircle(x + 3 * dp, top - 1.5f * dp, rad * 0.85f, fill);
+        }
+        // Holiday lights on the bare trees, 1 December to 6 January, twinkling softly
+        boolean holidays = month == 12 || (month == 1 && day <= 6);
+        if (holidays && darkness > 0.2f) {
+            float tw = 0.65f + 0.35f * (float) Math.sin(ms / 900.0);
+            dots.setStrokeWidth(2f * dp);
+            dots.setColor(Color.argb((int) (230 * darkness * tw), 255, 226, 160));
+            c.drawPoints(treeLights, dots);
+        }
     }
 
     private void drawPeople(Canvas c, boolean night, boolean wet) {

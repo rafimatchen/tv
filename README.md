@@ -70,15 +70,28 @@ mapping is `remote_buttons` in `config.xml`. To find another button's keycode, p
 
 ## Screensaver and live data
 
-The screensaver is the sky over Manhattan right now. The colours follow today's real sunrise and
-sunset, the weather is drawn in (clouds, rain, snow, fog, lightning), and a skyline with the
-Empire State Building sits along the bottom. The street below it moves slowly: cars and taxis
-with headlights at night, cyclists, people (with umbrellas in the rain), and streetlights and
-windows that switch on and off through the evening. Some of it follows the live data:
+The screensaver is Midtown right now, seen from Queens across the East River:
+
+- **Sky:** colours follow today's real sunrise and sunset; the moon shows its real phase (bigger
+  and brighter when full); meteors streak by during the real showers (Quadrantids, Lyrids, Eta
+  Aquariids, Perseids, Orionids, Leonids, Geminids).
+- **Weather:** clouds, rain, snow, fog and lightning, all moving with the real wind; a rooftop flag
+  shows its direction. Snow settles on the rooftops when there's snow on the ground.
+- **City:** the skyline with the Empire State Building, its crown lit in holiday colours
+  (Christmas, New Year, Valentine's, St Patrick's, Pride, July 4th, Halloween), with fireworks
+  over the skyline on July 4th and at midnight on New Year's Eve.
+- **Street:** cars and taxis, cyclists, people (with umbrellas in the rain), streetlights and
+  windows that come on through the evening, and street trees through the seasons: blossom,
+  green, autumn colours, bare, with lights from 1 December to 6 January.
+- **River:** the FDR's headlight streams, city lights and the sun or moon shimmering on the
+  water, and the odd ferry or tug.
+
+Some of it follows the live data:
 
 - when a 6 train is due at 28 St, the subway entrance's green globes brighten and people walk out;
 - when an M15 or 3rd Ave bus is arriving, a bus pulls into the stop;
-- the little Citi Bike dock holds as many bikes as the real one at 26 & 3rd.
+- the little Citi Bike dock holds as many bikes as the real one at 26 & 3rd;
+- on game days a rooftop sign shows the score.
 
 Over the skyline: the time, the weather in °C / °F, and four transit rows (6 train at 28 St,
 M15 local + SBS at 2 Av & 28 St, M101/M102/M103 uptown at 3 Av & 29 St, and classic + e-bikes at
@@ -92,13 +105,19 @@ the same thing under the date, and a faint sky tint at the top.
 | 6 train | MTA GTFS-realtime (no key) | 30 s |
 | Buses | MTA Bus Time (free key, see below) | 30 s |
 | Citi Bike | GBFS station status (no key) | 2 min |
+| Scores | ESPN scoreboard (no key, undocumented) | 1 min during a game, else 15 min |
 
 All fetching happens on one low-priority background thread, only while the screensaver or the
 home screen is showing, with 4–6 s timeouts. A failed request keeps the last good data, and
 nothing older than 3 minutes is shown.
 
-**Your stops, walk times and stations** are in `launcher/app/src/main/res/values/screensaver.xml`;
-edit and run `scripts/install.sh`.
+**Your stops, walk times and stations** are in `launcher/app/src/main/res/values/screensaver.xml`,
+and **your teams** in `sports.xml` (Blue Jays, Leafs, Raptors, TFC, Giants; ESPN no longer carries
+the CFL, so no Argonauts). Edit and run `scripts/install.sh`.
+
+**About panel:** long-press OK on the Settings pill (or press Info/Menu) on the home screen. It
+shows the version, when each data source last updated (or its error), memory, and whether the
+screensaver, ad-blocking DNS and remote-button helper are on.
 
 **Bus key:** get one free at https://register.developer.obanyc.com/ and give it to the TV (it's kept
 on the TV only, never in this repo):
@@ -114,17 +133,17 @@ is undocumented.
 
 ```sh
 adb shell am start -n com.android.systemui/.Somnambulator      # start the screensaver now
-adb shell am broadcast -n com.rafi.glasshome/.ConfigReceiver -a com.rafi.glasshome.PREVIEW_SKY --es mood rain --ef hour 19.5
-#   mood: clear | partly | cloudy | fog | drizzle | rain | snow | storm | live | off
-adb shell am broadcast -n com.rafi.glasshome/.ConfigReceiver -a com.rafi.glasshome.PREVIEW_SKY --es event bus   # or train
+adb shell am broadcast -n com.rafi.glasshome/.ConfigReceiver -a com.rafi.glasshome.PREVIEW_SKY --es mood rain --ef hour 19.5 --es date 12-20
+#   mood: clear | partly | cloudy | fog | drizzle | rain | snow | storm | live | off   (date is optional, MM-DD)
+adb shell am broadcast -n com.rafi.glasshome/.ConfigReceiver -a com.rafi.glasshome.PREVIEW_SKY --es event bus   # train | fireworks | meteor
 ```
 
 **Timing** (ms): `adb shell settings put system screen_off_timeout 600000` starts it after 10 min,
 `adb shell settings put secure sleep_timeout 1200000` puts the TV to sleep after 20. Back to Google's
 Ambient mode: `adb shell settings put secure screensaver_components com.google.android.apps.tv.dreamx/.service.Backdrop`.
 
-**Cost:** about 50 MB of RAM. With the TV otherwise idle, the whole TV runs at roughly 21% CPU with
-the screensaver on a clear night and 31% in heavy rain (13% on the home screen).
+**Cost:** about 60 MB of RAM. With the TV otherwise idle, the whole TV runs at roughly 26% CPU with
+the screensaver on a clear night and a bit over 30% in heavy rain (13% on the home screen).
 
 ## If something breaks
 

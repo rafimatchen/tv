@@ -10,8 +10,8 @@ import android.content.SharedPreferences;
  *   SET_DOCK --es dock "pkg1,pkg2,pkg3,pkg4"   (--es dock default = back to config.xml)
  *   SET_NAME --es name "Rafi"                   (--es name default = config.xml, --esn name = no name)
  *   SET_BUS_KEY --es key "..."                  (MTA Bus Time key; --esn key = go back to keyless)
- *   PREVIEW_SKY --es mood rain --ef hour 19.5   (screensaver preview; --es mood off = live)
- *   PREVIEW_SKY --es event bus|train            (play a street event now)
+ *   PREVIEW_SKY --es mood rain --ef hour 19.5 [--es date 12-20]   (preview; --es mood off = live)
+ *   PREVIEW_SKY --es event bus|train|fireworks|meteor   (play an event now)
  * HomeActivity listens for the preference change and redraws.
  */
 public class ConfigReceiver extends BroadcastReceiver {
@@ -22,6 +22,7 @@ public class ConfigReceiver extends BroadcastReceiver {
     static final String KEY_PREVIEW_MOOD = "previewMood";
     static final String KEY_PREVIEW_HOUR = "previewHour";
     static final String KEY_PREVIEW_EVENT = "previewEvent";
+    static final String KEY_PREVIEW_DATE = "previewDate";
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -42,10 +43,13 @@ public class ConfigReceiver extends BroadcastReceiver {
         } else if (action.endsWith("PREVIEW_SKY")) {
             String mood = intent.getStringExtra("mood");
             if (mood == null || mood.equals("off")) {
-                e.remove(KEY_PREVIEW_MOOD).remove(KEY_PREVIEW_HOUR);
+                e.remove(KEY_PREVIEW_MOOD).remove(KEY_PREVIEW_HOUR).remove(KEY_PREVIEW_DATE);
             } else {
                 e.putString(KEY_PREVIEW_MOOD, mood);
                 e.putFloat(KEY_PREVIEW_HOUR, intent.getFloatExtra("hour", -1f));
+                String date = intent.getStringExtra("date"); // "MM-DD"
+                if (date == null) e.remove(KEY_PREVIEW_DATE);
+                else e.putString(KEY_PREVIEW_DATE, date);
             }
         } else if (action.endsWith("SET_NAME")) {
             String name = intent.getStringExtra("name");

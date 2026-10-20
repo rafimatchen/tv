@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Teams followed by Sports.java (live scores from ESPN's public scoreboard API).
+         One item per team:  sport/league|team|name|#colour
+           sport/league  ESPN path, as in site.api.espn.com/apis/site/v2/sports/{sport/league}/scoreboard
+                         (baseball/mlb, hockey/nhl, basketball/nba, football/nfl, soccer/usa.1 = MLS)
+           team          ESPN team abbreviation or numeric ESPN team id (either matches)
+           name          short display name shown on screen
+           #colour       team colour, #RRGGBB or #AARRGGBB
+         Only leagues listed here are requested. ESPN's CFL data stopped in 2022/2023, so the
+         Argonauts (football/cfl, TAT, id 85) can't be followed. -->
+    <string-array name="sports_teams">
+        <item>baseball/mlb|TOR|Blue Jays|#134A8E</item>
+        <item>hockey/nhl|TOR|Leafs|#00205B</item>
+        <item>basketball/nba|TOR|Raptors|#CE1141</item>
+        <item>soccer/usa.1|TOR|TFC|#B81137</item>
+        <item>football/nfl|NYG|Giants|#0B2265</item>
+    </string-array>
+</resources>

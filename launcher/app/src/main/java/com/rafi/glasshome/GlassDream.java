@@ -41,7 +41,7 @@ public class GlassDream extends DreamService implements Feeds.Listener, SharedPr
     private float dp;
     private SkyView sky;
     private FrameLayout info;
-    private TextView clock, date, weatherLine, subwayLine, busLine, bus3Line, bikeLine;
+    private TextView clock, date, weatherLine, sportsLine, subwayLine, busLine, bus3Line, bikeLine;
     private Feeds feeds;
     private SharedPreferences prefs;
     private Typeface regular, medium;
@@ -102,6 +102,10 @@ public class GlassDream extends DreamService implements Feeds.Listener, SharedPr
         LinearLayout.LayoutParams wl = wrap();
         wl.topMargin = px(6);
         top.addView(weatherLine, wl);
+        sportsLine = text(300, 20);
+        LinearLayout.LayoutParams spl = wrap();
+        spl.topMargin = px(6);
+        top.addView(sportsLine, spl);
         FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
         tl.leftMargin = px(64);
         tl.topMargin = px(40);
@@ -115,7 +119,7 @@ public class GlassDream extends DreamService implements Feeds.Listener, SharedPr
         bikeLine = row(bottom, bikeBadge());
         FrameLayout.LayoutParams bl = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.START);
         bl.leftMargin = px(64);
-        bl.bottomMargin = px(48); // leaves the street below visible
+        bl.bottomMargin = px(74); // above the street trees, the FDR and the river
         info.addView(bottom, bl);
 
         setContentView(root);
@@ -156,6 +160,8 @@ public class GlassDream extends DreamService implements Feeds.Listener, SharedPr
             String ev = sp.getString(key, "");
             if (ev.startsWith("bus")) sky.busArriving();
             else if (ev.startsWith("train")) sky.trainArriving();
+            else if (ev.startsWith("fireworks")) sky.previewFireworks();
+            else if (ev.startsWith("meteor")) sky.previewMeteor();
         }
     }
 
@@ -164,15 +170,25 @@ public class GlassDream extends DreamService implements Feeds.Listener, SharedPr
     @Override
     public void onFeedsUpdated() {
         Feeds.Weather w = Feeds.weather;
-        if (w != null) sky.setSun(w.sunrise, w.sunset);
+        if (w != null) {
+            sky.setSun(w.sunrise, w.sunset);
+            sky.setWind(w.windKmh, w.windFromDeg);
+            sky.setSnowCover(w.snowDepthM > 0.01);
+        }
         int mood = w != null ? SkyView.moodFor(w.code, w.cloudCover) : SkyView.CLEAR;
 
         String preview = prefs.getString(ConfigReceiver.KEY_PREVIEW_MOOD, null);
         if (preview != null) {
             mood = previewMood(preview, mood);
             float hour = prefs.getFloat(ConfigReceiver.KEY_PREVIEW_HOUR, -1f);
+            String date = prefs.getString(ConfigReceiver.KEY_PREVIEW_DATE, null);
             if (hour >= 0) {
                 Calendar c = Calendar.getInstance();
+                if (date != null && date.matches("\\d{1,2}-\\d{1,2}")) {
+                    String[] md = date.split("-");
+                    c.set(Calendar.MONTH, Integer.parseInt(md[0]) - 1);
+                    c.set(Calendar.DAY_OF_MONTH, Integer.parseInt(md[1]));
+                }
                 c.set(Calendar.HOUR_OF_DAY, 0);
                 c.set(Calendar.MINUTE, 0);
                 c.set(Calendar.SECOND, 0);
@@ -193,7 +209,37 @@ public class GlassDream extends DreamService implements Feeds.Listener, SharedPr
         } else {
             weatherLine.setVisibility(View.INVISIBLE);
         }
+        renderSports();
         renderTransit();
+    }
+
+    /** Game days: a line under the weather and a lit sign on a rooftop. */
+    private void renderSports() {
+        Sports.Game g = Sports.headline();
+        if (g == null) {
+            sportsLine.setVisibility(View.GONE);
+            sky.setSign(null, 0);
+            return;
+        }
+        boolean live = "in".equals(g.state);
+        SpannableStringBuilder s = new SpannableStringBuilder();
+        span(s, "\u25CF  ", brighten(g.color), regular);
+        span(s, Sports.describe(g, true), live ? BRIGHT : DIM, live ? medium : regular);
+        sportsLine.setText(s);
+        sportsLine.setVisibility(View.VISIBLE);
+        String sign = live || "post".equals(g.state)
+                ? g.us + " " + g.usScore + "  " + g.them + " " + g.themScore
+                : g.us + " vs " + g.them;
+        sky.setSign(sign.toUpperCase(Locale.US), live ? 0xFFFFC857 : 0xFFDDE6FF);
+    }
+
+    /** Team navies vanish on a night sky; lift dark colours so the dot stays visible. */
+    private static int brighten(int c) {
+        float[] hsv = new float[3];
+        android.graphics.Color.colorToHSV(c, hsv);
+        hsv[2] = Math.max(hsv[2], 0.85f);
+        hsv[1] = Math.min(hsv[1], 0.75f);
+        return android.graphics.Color.HSVToColor(hsv);
     }
 
     private static long celsius(double fahrenheit) {
