@@ -8,6 +8,22 @@ launcher. Tested on a Hisense "SmartTV 4K FFM" (MediaTek, Google TV on Android 1
 - **Glass Home:** black background, clock and greeting, a 4-app dock, an app grid, an Inputs
   menu, and a live-sky screensaver with NYC transit, Citi Bike and weather. Navigation with the remote is predictable, and the launcher uses about 30 MB of RAM.
 
+![Home screen](docs/screenshots/home.jpg)
+
+<details>
+<summary>More screenshots</summary>
+
+| | |
+|---|---|
+| ![Screensaver at night](docs/screenshots/screensaver-night.jpg) | ![Autumn afternoon](docs/screenshots/screensaver-autumn.jpg) |
+| Night, with live transit and a game on | An autumn afternoon |
+| ![Rain](docs/screenshots/screensaver-rain.jpg) | ![December snow](docs/screenshots/screensaver-december.jpg) |
+| Rain blowing with the real wind | December: snow, holiday lights, red and green crown |
+| ![July 4th](docs/screenshots/screensaver-july4.jpg) | ![Inputs menu](docs/screenshots/inputs.jpg) |
+| Fireworks on July 4th | The Inputs menu |
+
+</details>
+
 ## Quick start
 
 Requirements: `adb`, JDK 17 and the Android SDK (platform 34). On macOS:
