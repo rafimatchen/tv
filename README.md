@@ -6,7 +6,7 @@ launcher. Tested on a Hisense "SmartTV 4K FFM" (MediaTek, Google TV on Android 1
 - **Debloat:** 41 packages disabled (Hisense tracking and ads, preloaded extras, unused apps).
   Nothing is uninstalled, and one script undoes it all.
 - **Glass Home:** black background, clock and greeting, a 4-app dock, an app grid, an Inputs
-  menu and a clock screensaver. Navigation with the remote is predictable, and the launcher uses about 30 MB of RAM.
+  menu, and a live-sky screensaver with NYC transit, Citi Bike and weather. Navigation with the remote is predictable, and the launcher uses about 30 MB of RAM.
 
 ## Quick start
 
@@ -63,16 +63,68 @@ adb push photo.jpg /sdcard/Android/data/com.rafi.glasshome/files/wallpaper.jpg  
 adb shell rm /sdcard/Android/data/com.rafi.glasshome/files/wallpaper.jpg         # back to black
 ```
 
-**Screensaver:** `install.sh` sets Glass Home's clock screensaver, which moves once a minute to
-avoid burn-in. To switch back to Google's Ambient mode, run `adb shell settings put secure
-screensaver_components com.google.android.apps.tv.dreamx/.service.Backdrop`. Timing, in
-milliseconds: `adb shell settings put system screen_off_timeout 600000` (start after 10 min) and
-`adb shell settings put secure sleep_timeout 1200000` (sleep after 20 min).
-
 **Remote app buttons:** with the stock launcher disabled, the YouTube and Prime buttons need
 Glass Home's "remote buttons" accessibility helper. It sees key presses only, not the screen. The
 mapping is `remote_buttons` in `config.xml`. To find another button's keycode, press it and run
 `adb logcat -d | grep "IR keycode"`.
+
+## Screensaver and live data
+
+The screensaver is the sky over Manhattan right now. The colours follow today's real sunrise and
+sunset, the weather is drawn in (clouds, rain, snow, fog, lightning), and a skyline with the
+Empire State Building sits along the bottom. The street below it moves slowly: cars and taxis
+with headlights at night, cyclists, people (with umbrellas in the rain), and streetlights and
+windows that switch on and off through the evening. Some of it follows the live data:
+
+- when a 6 train is due at 28 St, the subway entrance's green globes brighten and people walk out;
+- when an M15 or 3rd Ave bus is arriving, a bus pulls into the stop;
+- the little Citi Bike dock holds as many bikes as the real one at 26 & 3rd.
+
+Over the skyline: the time, the weather in °C / °F, and four transit rows (6 train at 28 St,
+M15 local + SBS at 2 Av & 28 St, M101/M102/M103 uptown at 3 Av & 29 St, and classic + e-bikes at
+two Citi Bike docks). Departures sooner than your walk to the stop are left out; the next one
+turns **amber with "leave now"** when it's time to go. The home screen shows a one-line version of
+the same thing under the date, and a faint sky tint at the top.
+
+| Data | Source | Refresh |
+|---|---|---|
+| Weather, sunrise/sunset | Open-Meteo (no key) | 15 min |
+| 6 train | MTA GTFS-realtime (no key) | 30 s |
+| Buses | MTA Bus Time (free key, see below) | 30 s |
+| Citi Bike | GBFS station status (no key) | 2 min |
+
+All fetching happens on one low-priority background thread, only while the screensaver or the
+home screen is showing, with 4–6 s timeouts. A failed request keeps the last good data, and
+nothing older than 3 minutes is shown.
+
+**Your stops, walk times and stations** are in `launcher/app/src/main/res/values/screensaver.xml`;
+edit and run `scripts/install.sh`.
+
+**Bus key:** get one free at https://register.developer.obanyc.com/ and give it to the TV (it's kept
+on the TV only, never in this repo):
+
+```sh
+adb shell am broadcast -n com.rafi.glasshome/.ConfigReceiver -a com.rafi.glasshome.SET_BUS_KEY --es key YOUR_KEY
+```
+
+Without a key, buses fall back to the endpoint the Bus Time website itself uses, which works but
+is undocumented.
+
+**Preview** any weather or time of day while the screensaver is running (`off` = live):
+
+```sh
+adb shell am start -n com.android.systemui/.Somnambulator      # start the screensaver now
+adb shell am broadcast -n com.rafi.glasshome/.ConfigReceiver -a com.rafi.glasshome.PREVIEW_SKY --es mood rain --ef hour 19.5
+#   mood: clear | partly | cloudy | fog | drizzle | rain | snow | storm | live | off
+adb shell am broadcast -n com.rafi.glasshome/.ConfigReceiver -a com.rafi.glasshome.PREVIEW_SKY --es event bus   # or train
+```
+
+**Timing** (ms): `adb shell settings put system screen_off_timeout 600000` starts it after 10 min,
+`adb shell settings put secure sleep_timeout 1200000` puts the TV to sleep after 20. Back to Google's
+Ambient mode: `adb shell settings put secure screensaver_components com.google.android.apps.tv.dreamx/.service.Backdrop`.
+
+**Cost:** about 50 MB of RAM. With the TV otherwise idle, the whole TV runs at roughly 21% CPU with
+the screensaver on a clear night and 31% in heavy rain (13% on the home screen).
 
 ## If something breaks
 

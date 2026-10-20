@@ -24,7 +24,13 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.graphics.Typeface;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.ImageSpan;
+import android.text.style.TypefaceSpan;
 import android.text.format.DateFormat;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
@@ -57,7 +63,7 @@ import java.util.concurrent.Executors;
  * three-zone model (top bar, dock, grid) instead of Android's focus search, so
  * navigation is deterministic: Up/Down always move exactly one row.
  */
-public class HomeActivity extends Activity implements SharedPreferences.OnSharedPreferenceChangeListener {
+public class HomeActivity extends Activity implements SharedPreferences.OnSharedPreferenceChangeListener, Feeds.Listener {
     private static final int ZONE_TOP = 0, ZONE_DOCK = 1, ZONE_GRID = 2;
     private static final int COLS = 4;
     private static final int PILL_INPUTS = 0, PILL_WIFI = 1, PILL_SETTINGS = 2;
@@ -101,12 +107,26 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private long wallpaperStamp = -1;
 
+    // Live data, shared with the screensaver: weather on the date line, a one-line transit
+    // glance, and a faint time-of-day sky tint. Fetched only while home is in front.
+    private Feeds feeds;
+    private TextView glance;
+    private View skyTint;
+    private GradientDrawable skyTintDrawable;
+    private final Runnable glanceTick = new Runnable() {
+        @Override
+        public void run() {
+            renderGlance(); // countdowns move between feed refreshes
+            handler.postDelayed(this, 20_000);
+        }
+    };
+
     private final Runnable reloadApps = this::reloadApps;
 
     private final BroadcastReceiver timeReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent i) {
-            updateClock();
+            onFeedsUpdated();
         }
     };
 
@@ -172,7 +192,10 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         tf.addAction(Intent.ACTION_TIME_CHANGED);
         tf.addAction(Intent.ACTION_TIMEZONE_CHANGED);
         registerReceiver(timeReceiver, tf);
-        updateClock();
+        onFeedsUpdated(); // cached data straight away
+        feeds = new Feeds(this);
+        feeds.start(this);
+        handler.postDelayed(glanceTick, 20_000);
     }
 
     @Override
@@ -187,6 +210,8 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         super.onStop();
         inForeground = false;
         unregisterReceiver(timeReceiver);
+        feeds.stop();
+        handler.removeCallbacks(glanceTick);
         inputsMenu.dismiss();
     }
 
@@ -217,6 +242,8 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
             reloadApps();
         } else if (ConfigReceiver.KEY_NAME.equals(key)) {
             updateClock();
+        } else if (ConfigReceiver.KEY_PREVIEW_MOOD.equals(key) || ConfigReceiver.KEY_PREVIEW_HOUR.equals(key)) {
+            updateSkyTint();
         }
     }
 
@@ -258,6 +285,12 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
                 new int[]{0x8C000000, 0x59000000, 0xD9000000}));
         scrim.setVisibility(View.GONE);
         root.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
+
+        // A hint of the real sky (dawn, day, dusk, night, weather) at the top, fading to black.
+        skyTint = new View(this);
+        skyTintDrawable = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0, 0});
+        skyTint.setBackground(skyTintDrawable);
+        root.addView(skyTint, new FrameLayout.LayoutParams(-1, Math.round(screenH * 0.6f)));
 
         page = new FrameLayout(this);
         page.setClipChildren(false);
@@ -304,6 +337,10 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         clp.topMargin = px(2);
         clockBlock.addView(clock, clp);
         clockBlock.addView(date, new LinearLayout.LayoutParams(-2, -2));
+        glance = text(300, 17, 0x99FFFFFF);
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(-2, -2);
+        glp.topMargin = px(12);
+        clockBlock.addView(glance, glp);
         page.addView(clockBlock, at(-2, -2, side, px(34)));
 
         LinearLayout pillRow = new LinearLayout(this);
@@ -783,7 +820,138 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         String name = prefs.getString(ConfigReceiver.KEY_NAME, getString(R.string.greeting_name));
         greeting.setText(TextUtils.isEmpty(name) ? part : part + ", " + name);
         clock.setText(DateFormat.format(DateFormat.is24HourFormat(this) ? "H:mm" : "h:mm", now));
-        date.setText(DateFormat.format(DateFormat.getBestDateTimePattern(Locale.getDefault(), "EEEEMMMMd"), now));
+        SpannableStringBuilder d = new SpannableStringBuilder(
+                DateFormat.format(DateFormat.getBestDateTimePattern(Locale.getDefault(), "EEEEMMMMd"), now));
+        Feeds.Weather w = Feeds.weather;
+        if (w != null) {
+            long c = Math.round((w.temp - 32) * 5 / 9);
+            d.append("   ·   ").append(String.valueOf(c)).append("°C / ").append(String.valueOf(Math.round(w.temp)))
+                    .append("°F   ").append(SkyView.moodLabel(SkyView.moodFor(w.code, w.cloudCover)));
+        }
+        date.setText(d);
+    }
+
+    @Override
+    public void onFeedsUpdated() {
+        updateClock();
+        renderGlance();
+        updateSkyTint();
+    }
+
+    /** "[6] ↑6 ↓18 min   [M15] ↓9 min   [3 Av] ↑11 min   [bike] 17 ⚡2": next ones you can still make. */
+    private void renderGlance() {
+        long now = Feeds.now();
+        SpannableStringBuilder s = new SpannableStringBuilder();
+        Typeface badge = Fonts.get(this, 600);
+        float bh = 21 * dp;
+
+        Feeds.Arrivals sub = Feeds.subway;
+        if (Feeds.fresh(sub, now)) {
+            int walk = getResources().getInteger(R.integer.subway_walk_min);
+            badge(s, new BadgeSpan(getString(R.string.subway_route), null, 0xFF00933C, true, badge, bh));
+            arrow(s, true);
+            glanceTime(s, "", Feeds.nextCatchable(sub.uptown, walk, now), walk, false);
+            s.append("   ");
+            arrow(s, false);
+            glanceTime(s, "", Feeds.nextCatchable(sub.downtown, walk, now), walk, true);
+        }
+        Feeds.Arrivals local = Feeds.bus, sbs = Feeds.busSbs;
+        if (Feeds.fresh(local, now) || Feeds.fresh(sbs, now)) {
+            int walk = getResources().getInteger(R.integer.bus_walk_min);
+            int a = Feeds.fresh(local, now) ? Feeds.nextCatchable(local.downtown, walk, now) : -1;
+            int b = Feeds.fresh(sbs, now) ? Feeds.nextCatchable(sbs.downtown, walk, now) : -1;
+            int next = a < 0 ? b : b < 0 ? a : Math.min(a, b); // local or SBS, whichever comes first
+            gap(s);
+            badge(s, new BadgeSpan(getString(R.string.bus_route), null, 0xFF1C5BB8, false, badge, bh));
+            arrow(s, false); // 2nd Ave: downtown only
+            glanceTime(s, "", next, walk, true);
+        }
+        Feeds.Arrivals third = Feeds.busThird;
+        if (Feeds.fresh(third, now)) {
+            int walk = getResources().getInteger(R.integer.bus3_walk_min);
+            gap(s);
+            badge(s, new BadgeSpan(getString(R.string.bus3_badge), null, 0xFF1C5BB8, false, badge, bh));
+            arrow(s, true); // 3rd Ave: uptown only
+            glanceTime(s, "", Feeds.nextCatchable(third.uptown, walk, now), walk, true);
+        }
+        Feeds.Station[] st = Feeds.bikes;
+        if (st != null && st.length > 0 && st[0] != null && st[0].renting) {
+            gap(s);
+            badge(s, new BadgeSpan(null, new Icons(Icons.BIKE, 0xFFFFFFFF), 0xFF0A6FD1, true, badge, bh));
+            int classic = Math.max(0, st[0].bikes - st[0].ebikes);
+            glanceSpan(s, String.valueOf(classic), 0xE6FFFFFF, 500);
+            s.append("  ");
+            Icons bolt = new Icons(Icons.BOLT, 0x99FFFFFF);
+            int size = px(12);
+            bolt.setBounds(0, 0, size, size);
+            int at = s.length();
+            s.append("\u00A0");
+            s.setSpan(new ImageSpan(bolt, ImageSpan.ALIGN_BASELINE), at, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            glanceSpan(s, String.valueOf(st[0].ebikes), 0xE6FFFFFF, 500);
+        }
+        glance.setText(s);
+        glance.setVisibility(s.length() > 0 ? View.VISIBLE : View.GONE);
+    }
+
+    private void badge(SpannableStringBuilder s, BadgeSpan span) {
+        int at = s.length();
+        s.append("\u2009");
+        s.setSpan(span, at, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        s.append("  ");
+    }
+
+    private void arrow(SpannableStringBuilder s, boolean up) {
+        Icons d = new Icons(up ? Icons.UP : Icons.DOWN, 0x99FFFFFF);
+        int size = px(12);
+        d.setBounds(0, 0, size, size);
+        int at = s.length();
+        s.append("\u00A0");
+        s.setSpan(new ImageSpan(d, ImageSpan.ALIGN_BASELINE), at, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        s.append("\u2009");
+    }
+
+    private static void gap(SpannableStringBuilder s) {
+        s.append("        ");
+    }
+
+    private void glanceTime(SpannableStringBuilder s, String label, int min, int walk, boolean unit) {
+        if (!label.isEmpty()) glanceSpan(s, label, 0x99FFFFFF, 300);
+        if (min < 0) {
+            glanceSpan(s, "—", 0x66FFFFFF, 300);
+            return;
+        }
+        glanceSpan(s, String.valueOf(min), min - walk <= 1 ? 0xFFFFB547 : 0xE6FFFFFF, 500); // amber = leave now
+        if (unit) glanceSpan(s, " min", 0x66FFFFFF, 300);
+    }
+
+    private void glanceSpan(SpannableStringBuilder s, String text, int color, int weight) {
+        int at = s.length();
+        s.append(text);
+        s.setSpan(new ForegroundColorSpan(color), at, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        s.setSpan(new TypefaceSpan(Fonts.get(this, weight)), at, s.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
+    private void updateSkyTint() {
+        if (wallpaper.getVisibility() == View.VISIBLE) {
+            skyTint.setVisibility(View.GONE); // a wallpaper brings its own colour
+            return;
+        }
+        skyTint.setVisibility(View.VISIBLE);
+        Feeds.Weather w = Feeds.weather;
+        long[] sun = w != null ? new long[]{w.sunrise, w.sunset} : SkyView.fallbackSun();
+        int mood = w != null ? SkyView.moodFor(w.code, w.cloudCover) : SkyView.CLEAR;
+        long now = Feeds.now();
+        float previewHour = prefs.getFloat(ConfigReceiver.KEY_PREVIEW_HOUR, -1f);
+        if (prefs.contains(ConfigReceiver.KEY_PREVIEW_MOOD) && previewHour >= 0) { // see README: preview
+            Calendar midnight = Calendar.getInstance();
+            midnight.set(Calendar.HOUR_OF_DAY, 0);
+            midnight.set(Calendar.MINUTE, 0);
+            now = midnight.getTimeInMillis() / 1000 + (long) (previewHour * 3600);
+        }
+        int[] c = new int[3];
+        SkyView.computeSky(now, sun[0], sun[1], mood, c);
+        int top = SkyView.lerpColor(c[0], c[1], 0.5f) & 0x00FFFFFF;
+        skyTintDrawable.setColors(new int[]{0x55000000 | top, 0x1A000000 | (c[1] & 0x00FFFFFF), c[1] & 0x00FFFFFF});
     }
 
     private String describeNetwork(NetworkCapabilities caps) {
@@ -843,6 +1011,7 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
                 wallpaper.setImageBitmap(bmp);
                 wallpaper.setVisibility(bmp == null ? View.GONE : View.VISIBLE);
                 scrim.setVisibility(bmp == null ? View.GONE : View.VISIBLE);
+                updateSkyTint();
             });
         });
     }

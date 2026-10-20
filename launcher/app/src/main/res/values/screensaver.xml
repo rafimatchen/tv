@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the screensaver shows. Change these and run scripts/install.sh. -->
+<resources>
+    <!-- Weather and sky (Open-Meteo, no key). Near 2nd Ave & E 29th St. -->
+    <string name="weather_lat">40.7425</string>
+    <string name="weather_lon">-73.9790</string>
+
+    <!-- Subway: GTFS stop id without the N/S suffix. 633 = 28 St on the 6 (Lexington Ave). -->
+    <string name="subway_route">6</string>
+    <string name="subway_stop_label">28 St</string>
+    <string name="subway_stop_id">633</string>
+    <!-- Minutes to walk there; trains sooner than this are hidden, and the next one turns
+         amber when it's time to leave. -->
+    <integer name="subway_walk_min">6</integer>
+
+    <!-- Bus: MTA Bus Time stops and lines at 2 Av/E 28 St, both southbound. The local M15
+         and the M15 SBS use separate stops on the same corner. -->
+    <string name="bus_route">M15</string>
+    <string name="bus_stop_label">2 Av &amp; 28 St</string>
+    <string name="bus_stop_id">MTA_405336</string>
+    <string name="bus_line_ref">MTA NYCT_M15</string>
+    <string name="bus_sbs_stop_id">MTA_403525</string>
+    <string name="bus_sbs_line_ref">MTA NYCT_M15+</string>
+    <integer name="bus_walk_min">2</integer>
+
+    <!-- 3rd Ave uptown buses at 3 Av/E 29 St, northbound. The M101, M102 and M103 all go
+         uptown along 3rd Ave from here, so they're shown as one list. -->
+    <string name="bus3_badge">3 Av</string>
+    <string name="bus3_stop_label">29 St</string>
+    <string name="bus3_stop_id">MTA_402674</string>
+    <string-array name="bus3_line_refs">
+        <item>MTA NYCT_M101</item>
+        <item>MTA NYCT_M102</item>
+        <item>MTA NYCT_M103</item>
+    </string-array>
+    <integer name="bus3_walk_min">3</integer>
+
+    <!-- Citi Bike station_ids from the GBFS station_information feed, with short labels. -->
+    <string-array name="bike_station_ids">
+        <item>7c7cb750-6613-48a4-bfae-9240968f1fad</item>
+        <item>66dc8bfd-0aca-11e7-82f6-3863bb44ef7c</item>
+    </string-array>
+    <string-array name="bike_station_labels">
+        <item>26 &amp; 3rd</item>
+        <item>29 &amp; Lex</item>
+    </string-array>
+</resources>
