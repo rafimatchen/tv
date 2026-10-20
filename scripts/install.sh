@@ -55,5 +55,9 @@ fi
 adb shell settings put secure enabled_accessibility_services "${REST:+$REST:}$SVC"
 adb shell settings put secure accessibility_enabled 1
 
+# Glass Home's clock screensaver
+adb shell settings put secure screensaver_components $PKG/.GlassDream
+adb shell settings put secure screensaver_enabled 1
+
 adb shell input keyevent KEYCODE_HOME
 echo "HOME now resolves to: $(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1)"

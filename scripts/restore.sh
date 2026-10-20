@@ -22,6 +22,8 @@ if [ -z "$NEW" ]; then
 else
   adb shell settings put secure enabled_accessibility_services "$NEW"
 fi
+# Screensaver back to Google's Ambient mode
+adb shell settings put secure screensaver_components com.google.android.apps.tv.dreamx/.service.Backdrop
 # Private DNS back to the Android default
 adb shell settings put global private_dns_mode opportunistic
 adb shell settings delete global private_dns_specifier

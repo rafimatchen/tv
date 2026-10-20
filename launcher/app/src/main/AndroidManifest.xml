@@ -62,6 +62,18 @@
                 android:resource="@xml/remote_buttons" />
         </service>
 
+        <!-- Screensaver; selected over ADB by install.sh (Google TV's Settings only offers Ambient mode). -->
+        <service
+            android:name=".GlassDream"
+            android:exported="true"
+            android:label="Glass Home clock"
+            android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+
         <!-- Lets you change the dock or greeting over ADB without rebuilding (see README).
              DUMP is held by the ADB shell but not by ordinary apps, so only you can send these. -->
         <receiver

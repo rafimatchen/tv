@@ -5,8 +5,8 @@ launcher. Tested on a Hisense "SmartTV 4K FFM" (MediaTek, Google TV on Android 1
 
 - **Debloat:** 41 packages disabled (Hisense tracking and ads, preloaded extras, unused apps).
   Nothing is uninstalled, and one script undoes it all.
-- **Glass Home:** black background, clock and greeting, a 4-app dock, an app grid and an Inputs
-  menu. Navigation with the remote is predictable, and the launcher uses about 30 MB of RAM.
+- **Glass Home:** black background, clock and greeting, a 4-app dock, an app grid, an Inputs
+  menu and a clock screensaver. Navigation with the remote is predictable, and the launcher uses about 30 MB of RAM.
 
 ## Quick start
 
@@ -62,6 +62,12 @@ for no name.
 adb push photo.jpg /sdcard/Android/data/com.rafi.glasshome/files/wallpaper.jpg   # then press Home
 adb shell rm /sdcard/Android/data/com.rafi.glasshome/files/wallpaper.jpg         # back to black
 ```
+
+**Screensaver:** `install.sh` sets Glass Home's clock screensaver, which moves once a minute to
+avoid burn-in. To switch back to Google's Ambient mode, run `adb shell settings put secure
+screensaver_components com.google.android.apps.tv.dreamx/.service.Backdrop`. Timing, in
+milliseconds: `adb shell settings put system screen_off_timeout 600000` (start after 10 min) and
+`adb shell settings put secure sleep_timeout 1200000` (sleep after 20 min).
 
 **Remote app buttons:** with the stock launcher disabled, the YouTube and Prime buttons need
 Glass Home's "remote buttons" accessibility helper. It sees key presses only, not the screen. The
