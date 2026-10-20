@@ -1,0 +1,15 @@
+# Python venv (adb-shell fallback client)
+.venv/
+
+# Gradle / Android build output
+launcher/.gradle/
+launcher/build/
+launcher/app/build/
+launcher/local.properties
+
+.DS_Store
+
+# Kept locally, never published: device identifiers, settings dumps,
+# and screenshots showing the Wi-Fi name and account recommendations.
+backup/
+shots/

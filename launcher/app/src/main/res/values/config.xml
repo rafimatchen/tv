@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dock apps, left to right. Package names; apps that aren't installed are skipped.
+         Can also be changed at runtime over ADB, see README. -->
+    <string-array name="default_dock">
+        <item>com.plexapp.android</item>
+        <item>com.espn.score_center</item>
+        <item>com.google.android.youtube.tv</item>
+        <item>com.amazon.amazonvideo.livingroom</item>
+    </string-array>
+
+    <!-- Remote app buttons handled by Glass Home's accessibility helper: keycode=package.
+         190 = YouTube button (KEYCODE_BUTTON_3), 295 = Prime Video button (KEYCODE_VIDEO_APP_7).
+         The Netflix button is handled by the TV itself and needs no entry. -->
+    <string-array name="remote_buttons">
+        <item>190=com.google.android.youtube.tv</item>
+        <item>295=com.amazon.amazonvideo.livingroom</item>
+    </string-array>
+    <string name="remote_buttons_description">Makes the YouTube and Prime Video buttons on the remote work with Glass Home. Reads key presses only.</string>
+
+    <!-- Shown after the greeting ("Good evening, Rafi"). Leave empty for no name. -->
+    <string name="greeting_name">Rafi</string>
+</resources>
