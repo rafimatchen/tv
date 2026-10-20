@@ -5,6 +5,8 @@
 set -e
 : "${ANDROID_SERIAL:=192.168.1.157:5555}"; export ANDROID_SERIAL
 : "${JAVA_HOME:=/opt/homebrew/opt/openjdk@17}"; export JAVA_HOME
+# Homebrew's SDK location; local.properties isn't in git, so Gradle needs this on a fresh clone.
+: "${ANDROID_HOME:=/opt/homebrew/share/android-commandlinetools}"; export ANDROID_HOME
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
 APK=launcher/app/build/outputs/apk/debug/app-debug.apk
