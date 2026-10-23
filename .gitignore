@@ -13,3 +13,6 @@ launcher/local.properties
 # and screenshots showing the Wi-Fi name and account recommendations.
 backup/
 shots/
+
+# Editor settings
+.vscode/
