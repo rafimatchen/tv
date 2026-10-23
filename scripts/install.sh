@@ -55,6 +55,10 @@ fi
 adb shell settings put secure enabled_accessibility_services "${REST:+$REST:}$SVC"
 adb shell settings put secure accessibility_enabled 1
 
+# Now-playing card: Android only shares what music apps are playing with an enabled
+# notification listener. Glass Home's ignores notifications.
+adb shell cmd notification allow_listener $PKG/$PKG.NowPlayingListener
+
 # Glass Home's clock screensaver
 adb shell settings put secure screensaver_components $PKG/.GlassDream
 adb shell settings put secure screensaver_enabled 1

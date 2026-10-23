@@ -22,6 +22,8 @@ if [ -z "$NEW" ]; then
 else
   adb shell settings put secure enabled_accessibility_services "$NEW"
 fi
+# Now-playing listener off
+adb shell cmd notification disallow_listener com.rafi.glasshome/com.rafi.glasshome.NowPlayingListener
 # Screensaver back to Google's Ambient mode
 adb shell settings put secure screensaver_components com.google.android.apps.tv.dreamx/.service.Backdrop
 # Private DNS back to the Android default

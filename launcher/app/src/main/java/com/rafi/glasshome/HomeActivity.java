@@ -111,6 +111,8 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
     // glance, and a faint time-of-day sky tint. Fetched only while home is in front.
     private Feeds feeds;
     private TextView glance, gameLine;
+    private NowPlaying nowPlaying;
+    private NowPlayingCard nowPlayingCard;
     private AboutPanel about;
     private View skyTint;
     private GradientDrawable skyTintDrawable;
@@ -197,6 +199,8 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         onFeedsUpdated(); // cached data straight away
         feeds = new Feeds(this);
         feeds.start(this);
+        nowPlaying = new NowPlaying(this, handler);
+        nowPlaying.start(nowPlayingCard::bind);
         handler.postDelayed(glanceTick, 20_000);
     }
 
@@ -214,6 +218,7 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         unregisterReceiver(timeReceiver);
         about.dismiss();
         feeds.stop();
+        nowPlaying.stop();
         handler.removeCallbacks(glanceTick);
         inputsMenu.dismiss();
     }
@@ -349,6 +354,13 @@ public class HomeActivity extends Activity implements SharedPreferences.OnShared
         gml.topMargin = px(8);
         clockBlock.addView(gameLine, gml);
         page.addView(clockBlock, at(-2, -2, side, px(34)));
+
+        // Now playing (Spotify): a small glass card under the pills, only while there's music.
+        nowPlayingCard = new NowPlayingCard(this);
+        FrameLayout.LayoutParams nlp = new FrameLayout.LayoutParams(px(340), -2, Gravity.TOP | Gravity.END);
+        nlp.topMargin = px(102);
+        nlp.rightMargin = side;
+        page.addView(nowPlayingCard, nlp);
 
         LinearLayout pillRow = new LinearLayout(this);
         pillRow.setOrientation(LinearLayout.HORIZONTAL);

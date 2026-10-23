@@ -18,6 +18,11 @@
     </string-array>
     <string name="remote_buttons_description">Makes the YouTube and Prime Video buttons on the remote work with Glass Home. Reads key presses only.</string>
 
+    <!-- Apps whose music shows in the home screen's "now playing" card. -->
+    <string-array name="now_playing_apps">
+        <item>com.spotify.tv.android</item>
+    </string-array>
+
     <!-- Shown after the greeting ("Good evening, Rafi"). Leave empty for no name. -->
     <string name="greeting_name">Rafi</string>
 </resources>

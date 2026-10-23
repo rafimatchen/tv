@@ -79,6 +79,12 @@ adb push photo.jpg /sdcard/Android/data/com.rafi.glasshome/files/wallpaper.jpg  
 adb shell rm /sdcard/Android/data/com.rafi.glasshome/files/wallpaper.jpg         # back to black
 ```
 
+**Now playing:** while Spotify plays on the TV, a small card under the top-right pills shows the
+cover, title, artist and progress, tinted from the cover; it dims when paused and disappears when
+nothing's playing. It needs Glass Home's notification listener (Android's rule for seeing other
+apps' music), which `install.sh` turns on; the listener ignores notifications. More apps can be
+added to `now_playing_apps` in `config.xml`.
+
 **Remote app buttons:** with the stock launcher disabled, the YouTube and Prime buttons need
 Glass Home's "remote buttons" accessibility helper. It sees key presses only, not the screen. The
 mapping is `remote_buttons` in `config.xml`. To find another button's keycode, press it and run

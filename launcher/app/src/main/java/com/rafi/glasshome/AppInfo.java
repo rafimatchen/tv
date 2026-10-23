@@ -65,7 +65,7 @@ final class AppInfo {
         return glowColor;
     }
 
-    private static int sampleGlow(Drawable d) {
+    static int sampleGlow(Drawable d) {
         final int w = 32, h = 18;
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Drawable copy = d.getConstantState() != null ? d.getConstantState().newDrawable().mutate() : d;

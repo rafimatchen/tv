@@ -63,6 +63,18 @@
                 android:resource="@xml/remote_buttons" />
         </service>
 
+        <!-- Lets Glass Home see what Spotify is playing (Android requires an enabled notification
+             listener for that). It ignores notifications; install.sh enables it. -->
+        <service
+            android:name=".NowPlayingListener"
+            android:exported="true"
+            android:label="Glass Home now playing"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <!-- Screensaver; selected over ADB by install.sh (Google TV's Settings only offers Ambient mode). -->
         <service
             android:name=".GlassDream"
